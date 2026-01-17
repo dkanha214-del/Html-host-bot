@@ -1,5 +1,6 @@
 import os
 import asyncio
+import threading
 from flask import Flask, Response, abort
 from pyrogram import Client, filters
 from dotenv import load_dotenv
@@ -20,20 +21,19 @@ bot = Client(
 
 app = Flask(__name__)
 
-# -------------------------
-# Serve HTML by message_id
-# -------------------------
+# --------------------
+# Flask: Serve HTML
+# --------------------
 @app.route("/html/<int:msg_id>")
 def serve_html(msg_id):
 
     async def fetch():
-        async with bot:
-            msg = await bot.get_messages(CHANNEL_ID, msg_id)
-            if not msg or not msg.document:
-                return None
-            file_path = await msg.download()
-            with open(file_path, "r", encoding="utf-8") as f:
-                return f.read()
+        msg = await bot.get_messages(CHANNEL_ID, msg_id)
+        if not msg or not msg.document:
+            return None
+        path = await msg.download()
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
 
     html = asyncio.run(fetch())
     if not html:
@@ -47,41 +47,50 @@ def home():
     return "HTML Host Bot is running"
 
 
-# -------------------------
-# Telegram BOT PART
-# -------------------------
-@bot.on_message(filters.command("upload") & filters.private)
-async def upload_html(client, message):
+# --------------------
+# Telegram Handlers
+# --------------------
+@bot.on_message(filters.command("start") & filters.private)
+async def start_cmd(client, message):
     await message.reply_text(
-        "HTML file bhejo (.html)\n"
-        "Main uska public link de dunga."
+        "✅ Bot Active\n\n"
+        "Use /upload and send .html file"
     )
 
+@bot.on_message(filters.command("upload") & filters.private)
+async def upload_cmd(client, message):
+    await message.reply_text("Send your .html file")
+
 @bot.on_message(filters.document & filters.private)
-async def handle_html(client, message):
+async def handle_file(client, message):
 
     if not message.document.file_name.endswith(".html"):
-        await message.reply_text("Sirf .html file allowed hai")
+        await message.reply_text("❌ Only .html files allowed")
         return
 
-    # Forward HTML file to private channel
     sent = await message.forward(CHANNEL_ID)
+    host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 
-    link = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/html/{sent.id}"
+    link = f"https://{host}/html/{sent.id}"
 
     await message.reply_text(
-        f"✅ HTML Uploaded Successfully\n\n"
+        "✅ Uploaded Successfully\n\n"
         f"🌐 Public Link:\n{link}"
     )
 
 
-# -------------------------
-# Run both Flask + Bot
-# -------------------------
+# --------------------
+# Start Bot (CORRECT)
+# --------------------
+async def start_bot():
+    await bot.start()
+    print("Bot started")
+    await asyncio.Event().wait()  # keep alive
+
 def run_bot():
-    bot.run()
+    asyncio.run(start_bot())
+
 
 if __name__ == "__main__":
-    import threading
     threading.Thread(target=run_bot).start()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
